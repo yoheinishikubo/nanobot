@@ -214,15 +214,22 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
 
 
 def test_github_copilot_token_prefers_env(monkeypatch):
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "gho_copilot_token")
     monkeypatch.setenv("GITHUB_TOKEN", "gho_env_token")
     monkeypatch.delenv("GH_TOKEN", raising=False)
 
-    assert _get_github_copilot_token() == "gho_env_token"
+    class Result:
+        stdout = "gho_cli_token\n"
+
+    monkeypatch.setattr("nanobot.cli.commands.subprocess.run", lambda *args, **kwargs: Result())
+
+    assert _get_github_copilot_token() == "gho_cli_token"
 
 
 def test_github_copilot_token_falls_back_to_gh_cli(monkeypatch):
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "gho_copilot_token")
+    monkeypatch.setenv("GITHUB_TOKEN", "gho_env_token")
+    monkeypatch.setenv("GH_TOKEN", "gho_gh_token")
 
     class Result:
         stdout = "gho_cli_token\n"

@@ -1157,12 +1157,7 @@ def _register_login(name: str):
 
 
 def _get_github_copilot_token() -> str | None:
-    """Get a GitHub token for Copilot access from env or the GitHub CLI."""
-    for env_name in ("GITHUB_TOKEN", "GH_TOKEN"):
-        token = os.environ.get(env_name, "").strip()
-        if token:
-            return token
-
+    """Get a GitHub token for Copilot access from the GitHub CLI only."""
     try:
         result = subprocess.run(
             ["gh", "auth", "token"],
@@ -1255,6 +1250,14 @@ def _login_github_copilot() -> None:
         asyncio.run(_trigger())
         console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
     except Exception as e:
+        error_text = str(e).lower()
+        if "forbidden" in error_text or "terms of service" in error_text:
+            console.print(
+                "[red]GitHub rejected the token for Copilot access.[/red]\n"
+                "Make sure the GitHub CLI account you are using has Copilot access "
+                "and is authenticated with `gh auth login`."
+            )
+            raise typer.Exit(1)
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
 

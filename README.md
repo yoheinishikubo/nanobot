@@ -924,7 +924,8 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 
 GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a plan](https://github.com/features/copilot/plans) configured.
 No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
-This login path reuses your GitHub CLI session, so run `gh auth login` first if `gh auth token` is not already available.
+This login path ignores environment-variable tokens and uses `gh auth token` only.
+If you need a different GitHub account, switch it in GitHub CLI first.
 
 **1. Login:**
 ```bash
