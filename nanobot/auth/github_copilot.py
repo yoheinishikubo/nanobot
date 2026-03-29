@@ -34,7 +34,7 @@ class DeviceCodeResponse:
 
 
 def _normalize_host(host: str | None = None) -> str:
-    value = (host or os.environ.get("GH_HOST") or DEFAULT_HOST).strip()
+    value = (host or DEFAULT_HOST).strip()
     if not value:
         value = DEFAULT_HOST
     if value.startswith("http://") or value.startswith("https://"):
@@ -44,7 +44,7 @@ def _normalize_host(host: str | None = None) -> str:
 
 
 def _base_url(host: str | None = None) -> str:
-    host_value = host or os.environ.get("GH_HOST") or DEFAULT_HOST
+    host_value = host or DEFAULT_HOST
     if host_value.startswith("http://") or host_value.startswith("https://"):
         return host_value.rstrip("/")
     return f"https://{host_value.strip('/')}"
@@ -111,16 +111,8 @@ def get_stored_token(host: str | None = None) -> str | None:
 
 
 def get_runtime_token(host: str | None = None) -> str | None:
-    """Resolve a Copilot token for API requests.
+    """Resolve a Copilot token for API requests from stored login state."""
 
-    Runtime precedence matches the Copilot CLI docs:
-    COPILOT_GITHUB_TOKEN, then GH_TOKEN, then GITHUB_TOKEN, then stored login.
-    """
-
-    for env_name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
-        token = os.environ.get(env_name, "").strip()
-        if token:
-            return token
     return get_stored_token(host)
 
 

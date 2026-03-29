@@ -926,7 +926,7 @@ GitHub Copilot uses OAuth instead of API keys. Requires a [GitHub account with a
 No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider login` stores the OAuth session outside config.
 The login command uses GitHub's device flow directly and saves the access token in `~/.nanobot/auth/github_copilot.json`.
 `nanobot status` shows whether that Copilot token is present.
-At runtime, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_TOKEN` still take precedence if they are set.
+At runtime, nanobot uses the stored Copilot token from `~/.nanobot/auth/github_copilot.json`.
 
 **1. Login:**
 ```bash

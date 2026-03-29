@@ -214,14 +214,14 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
-def test_github_copilot_runtime_token_prefers_env(monkeypatch, tmp_path):
+def test_github_copilot_runtime_token_ignores_env(monkeypatch, tmp_path):
     monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "gho_copilot_token")
     monkeypatch.setenv("GITHUB_TOKEN", "gho_env_token")
     monkeypatch.setenv("GH_TOKEN", "gho_gh_token")
     monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", tmp_path / "auth.json")
     store_token("gho_stored_token")
 
-    assert _get_github_copilot_runtime_token() == "gho_copilot_token"
+    assert _get_github_copilot_runtime_token() == "gho_stored_token"
 
 
 def test_github_copilot_runtime_token_falls_back_to_stored_token(monkeypatch, tmp_path):
@@ -290,6 +290,7 @@ def test_github_copilot_device_flow_ignores_env_tokens(monkeypatch, tmp_path):
     auth_path = tmp_path / "auth.json"
     monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", auth_path)
     monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "gho_env_token")
+    monkeypatch.setenv("GH_HOST", "example.invalid")
     monkeypatch.setattr("nanobot.auth.github_copilot.webbrowser.open", lambda *args, **kwargs: True)
 
     class Response:
@@ -325,7 +326,7 @@ def test_github_copilot_device_flow_ignores_env_tokens(monkeypatch, tmp_path):
 
     assert token == "gho_device_token"
     assert "gho_env_token" != get_stored_token()
-    assert calls[0].endswith("/login/device/code")
+    assert calls[0] == "https://github.com/login/device/code"
 
 
 def test_github_copilot_login_command_uses_device_flow(monkeypatch, tmp_path):
