@@ -220,6 +220,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Github Copilot",
         backend="openai_compat",
         default_api_base="https://api.githubcopilot.com",
+        strip_model_prefix=True,
         is_oauth=True,
     ),
     # DeepSeek: OpenAI-compatible at api.deepseek.com

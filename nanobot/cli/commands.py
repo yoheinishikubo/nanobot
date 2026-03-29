@@ -4,6 +4,7 @@ import asyncio
 from contextlib import contextmanager, nullcontext
 
 import os
+import subprocess
 import select
 import signal
 import sys
@@ -1155,6 +1156,27 @@ def _register_login(name: str):
     return decorator
 
 
+def _get_github_copilot_token() -> str | None:
+    """Get a GitHub token for Copilot access from env or the GitHub CLI."""
+    for env_name in ("GITHUB_TOKEN", "GH_TOKEN"):
+        token = os.environ.get(env_name, "").strip()
+        if token:
+            return token
+
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+
+    token = result.stdout.strip()
+    return token or None
+
+
 @provider_app.command("login")
 def provider_login(
     provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
@@ -1208,15 +1230,23 @@ def _login_github_copilot() -> None:
 
     from openai import AsyncOpenAI
 
-    console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
+    console.print("[cyan]Checking GitHub Copilot access with your GitHub session...[/cyan]\n")
+
+    token = _get_github_copilot_token()
+    if not token:
+        console.print(
+            "[red]No GitHub token found.[/red] Run [bold]gh auth login[/bold] "
+            "and make sure your account has Copilot access, then try again."
+        )
+        raise typer.Exit(1)
 
     async def _trigger():
         client = AsyncOpenAI(
-            api_key="dummy",
+            api_key=token,
             base_url="https://api.githubcopilot.com",
         )
         await client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1",
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=1,
         )

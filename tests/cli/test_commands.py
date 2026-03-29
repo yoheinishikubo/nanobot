@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import _make_provider, app
+from nanobot.cli.commands import _get_github_copilot_token, _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -211,6 +211,31 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
 
     assert config.get_provider_name() == "openai_codex"
+
+
+def test_github_copilot_token_prefers_env(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "gho_env_token")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    assert _get_github_copilot_token() == "gho_env_token"
+
+
+def test_github_copilot_token_falls_back_to_gh_cli(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    class Result:
+        stdout = "gho_cli_token\n"
+
+    monkeypatch.setattr("nanobot.cli.commands.subprocess.run", lambda *args, **kwargs: Result())
+
+    assert _get_github_copilot_token() == "gho_cli_token"
+
+
+def test_github_copilot_provider_strips_model_prefix():
+    spec = find_by_name("github-copilot")
+    assert spec is not None
+    assert spec.strip_model_prefix is True
 
 
 def test_config_dump_excludes_oauth_provider_blocks():
