@@ -50,6 +50,17 @@ def _base_url(host: str | None = None) -> str:
     return f"https://{host_value.strip('/')}"
 
 
+def _api_base_url(host: str | None = None) -> str:
+    """Return the GitHub API base URL for Copilot user endpoints."""
+
+    host_value = _normalize_host(host)
+    if host_value == "github.com":
+        return "https://api.github.com"
+    if host_value.startswith("api."):
+        return f"https://{host_value}"
+    return f"https://api.{host_value}"
+
+
 def _state_path() -> Path:
     return AUTH_STATE_PATH
 
@@ -206,7 +217,7 @@ def _exchange_device_code(base_url: str, device_code: str, interval: int, expire
 def validate_token(token: str, host: str | None = None) -> dict[str, object]:
     """Validate a Copilot token against GitHub's Copilot user endpoint."""
 
-    base_url = _base_url(host)
+    base_url = _api_base_url(host)
     response = httpx.get(
         f"{base_url}/copilot_internal/user",
         headers={

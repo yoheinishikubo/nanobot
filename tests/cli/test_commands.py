@@ -283,7 +283,7 @@ def test_github_copilot_device_flow_saves_token(monkeypatch, tmp_path):
     assert token == "gho_device_token"
     assert get_stored_token() == "gho_device_token"
     assert auth_path.exists()
-    assert any(c[0].endswith("/copilot_internal/user") for c in validate_calls)
+    assert any(c[0] == "https://api.github.com/copilot_internal/user" for c in validate_calls)
 
 
 def test_github_copilot_device_flow_ignores_env_tokens(monkeypatch, tmp_path):
