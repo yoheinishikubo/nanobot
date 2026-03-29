@@ -7,8 +7,9 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import _get_github_copilot_token, _make_provider, app
+from nanobot.cli.commands import _get_github_copilot_runtime_token, _make_provider, app
 from nanobot.config.schema import Config
+from nanobot.auth.github_copilot import get_stored_token, login_device_flow, store_token
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 
@@ -213,36 +214,150 @@ def test_config_matches_openai_codex_with_hyphen_prefix():
     assert config.get_provider_name() == "openai_codex"
 
 
-def test_github_copilot_token_prefers_env(monkeypatch):
-    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "gho_copilot_token")
-    monkeypatch.setenv("GITHUB_TOKEN", "gho_env_token")
-    monkeypatch.delenv("GH_TOKEN", raising=False)
-
-    class Result:
-        stdout = "gho_cli_token\n"
-
-    monkeypatch.setattr("nanobot.cli.commands.subprocess.run", lambda *args, **kwargs: Result())
-
-    assert _get_github_copilot_token() == "gho_cli_token"
-
-
-def test_github_copilot_token_falls_back_to_gh_cli(monkeypatch):
+def test_github_copilot_runtime_token_prefers_env(monkeypatch, tmp_path):
     monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "gho_copilot_token")
     monkeypatch.setenv("GITHUB_TOKEN", "gho_env_token")
     monkeypatch.setenv("GH_TOKEN", "gho_gh_token")
+    monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", tmp_path / "auth.json")
+    store_token("gho_stored_token")
 
-    class Result:
-        stdout = "gho_cli_token\n"
+    assert _get_github_copilot_runtime_token() == "gho_copilot_token"
 
-    monkeypatch.setattr("nanobot.cli.commands.subprocess.run", lambda *args, **kwargs: Result())
 
-    assert _get_github_copilot_token() == "gho_cli_token"
+def test_github_copilot_runtime_token_falls_back_to_stored_token(monkeypatch, tmp_path):
+    monkeypatch.delenv("COPILOT_GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", tmp_path / "auth.json")
+    store_token("gho_stored_token")
+
+    assert _get_github_copilot_runtime_token() == "gho_stored_token"
+
+
+def test_github_copilot_device_flow_saves_token(monkeypatch, tmp_path):
+    auth_path = tmp_path / "auth.json"
+    monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", auth_path)
+    monkeypatch.setattr("nanobot.auth.github_copilot.webbrowser.open", lambda *args, **kwargs: True)
+
+    device_response = {
+        "device_code": "device-123",
+        "user_code": "ABCD-EFGH",
+        "verification_uri": "https://github.com/login/device",
+        "expires_in": 900,
+        "interval": 1,
+    }
+
+    class Response:
+        def __init__(self, payload, ok=True, status_code=200, reason_phrase="OK"):
+            self._payload = payload
+            self.is_success = ok
+            self.status_code = status_code
+            self.reason_phrase = reason_phrase
+
+        def json(self):
+            return self._payload
+
+    post_calls = []
+
+    def fake_post(url, **kwargs):
+        post_calls.append((url, kwargs))
+        if url.endswith("/login/device/code"):
+            return Response(device_response)
+        if url.endswith("/login/oauth/access_token"):
+            if len([c for c in post_calls if c[0].endswith("/login/oauth/access_token")]) == 1:
+                return Response({"error": "authorization_pending"})
+            return Response({"access_token": "gho_device_token"})
+        raise AssertionError(url)
+
+    validate_calls = []
+
+    def fake_get(url, **kwargs):
+        validate_calls.append((url, kwargs))
+        return Response({"login": "yoheinishikubo"})
+
+    monkeypatch.setattr("nanobot.auth.github_copilot.httpx.post", fake_post)
+    monkeypatch.setattr("nanobot.auth.github_copilot.httpx.get", fake_get)
+
+    token = login_device_flow(print_fn=lambda *args, **kwargs: None, open_browser=False)
+
+    assert token == "gho_device_token"
+    assert get_stored_token() == "gho_device_token"
+    assert auth_path.exists()
+    assert any(c[0].endswith("/copilot_internal/user") for c in validate_calls)
+
+
+def test_github_copilot_device_flow_ignores_env_tokens(monkeypatch, tmp_path):
+    auth_path = tmp_path / "auth.json"
+    monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", auth_path)
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "gho_env_token")
+    monkeypatch.setattr("nanobot.auth.github_copilot.webbrowser.open", lambda *args, **kwargs: True)
+
+    class Response:
+        def __init__(self, payload):
+            self._payload = payload
+            self.is_success = True
+            self.status_code = 200
+            self.reason_phrase = "OK"
+
+        def json(self):
+            return self._payload
+
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if url.endswith("/login/device/code"):
+            return Response({
+                "device_code": "device-123",
+                "user_code": "ABCD-EFGH",
+                "verification_uri": "https://github.com/login/device",
+                "expires_in": 900,
+                "interval": 1,
+            })
+        if url.endswith("/login/oauth/access_token"):
+            return Response({"access_token": "gho_device_token"})
+        raise AssertionError(url)
+
+    monkeypatch.setattr("nanobot.auth.github_copilot.httpx.post", fake_post)
+    monkeypatch.setattr("nanobot.auth.github_copilot.httpx.get", lambda *args, **kwargs: Response({"login": "yoheinishikubo"}))
+
+    token = login_device_flow(print_fn=lambda *args, **kwargs: None, open_browser=False)
+
+    assert token == "gho_device_token"
+    assert "gho_env_token" != get_stored_token()
+    assert calls[0].endswith("/login/device/code")
+
+
+def test_github_copilot_login_command_uses_device_flow(monkeypatch, tmp_path):
+    monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", tmp_path / "auth.json")
+    monkeypatch.setattr(
+        "nanobot.auth.github_copilot.login_device_flow",
+        lambda **kwargs: "gho_command_token",
+    )
+
+    result = runner.invoke(app, ["provider", "login", "github-copilot"])
+
+    assert result.exit_code == 0
+    assert "Starting GitHub Copilot device flow" in result.stdout
+    assert "Authenticated with GitHub Copilot" in result.stdout
 
 
 def test_github_copilot_provider_strips_model_prefix():
     spec = find_by_name("github-copilot")
     assert spec is not None
     assert spec.strip_model_prefix is True
+
+
+def test_make_provider_uses_github_copilot_runtime_token(monkeypatch, tmp_path):
+    monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", tmp_path / "auth.json")
+    store_token("gho_runtime_token")
+
+    config = Config()
+    config.agents.defaults.model = "github-copilot/gpt-5.3-codex"
+
+    provider = _make_provider(config)
+
+    assert provider.api_key == "gho_runtime_token"
 
 
 def test_config_dump_excludes_oauth_provider_blocks():

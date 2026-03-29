@@ -424,6 +424,23 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
+    elif backend == "openai_compat" and spec and spec.name == "github_copilot":
+        from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+
+        token = _get_github_copilot_runtime_token()
+        if not token:
+            console.print(
+                "[red]Error: GitHub Copilot is not authenticated.[/red]\n"
+                "Run [bold]nanobot provider login github-copilot[/bold] first."
+            )
+            raise typer.Exit(1)
+        provider = OpenAICompatProvider(
+            api_key=token,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            spec=spec,
+        )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
         provider = OpenAICompatProvider(
@@ -1126,7 +1143,13 @@ def status():
             if p is None:
                 continue
             if spec.is_oauth:
-                console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
+                if spec.name == "github_copilot":
+                    if _get_github_copilot_runtime_token():
+                        console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
+                    else:
+                        console.print(f"{spec.label}: [dim]not logged in[/dim]")
+                else:
+                    console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
             elif spec.is_local:
                 # Local deployments show api_base instead of api_key
                 if p.api_base:
@@ -1156,20 +1179,16 @@ def _register_login(name: str):
     return decorator
 
 
-def _get_github_copilot_token() -> str | None:
-    """Get a GitHub token for Copilot access from the GitHub CLI only."""
-    try:
-        result = subprocess.run(
-            ["gh", "auth", "token"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return None
+def _get_github_copilot_runtime_token() -> str | None:
+    """Resolve a GitHub Copilot token for runtime API requests."""
+    from nanobot.auth.github_copilot import get_runtime_token
 
-    token = result.stdout.strip()
-    return token or None
+    return get_runtime_token()
+
+
+def _get_github_copilot_token() -> str | None:
+    """Backward-compatible alias for the Copilot runtime token helper."""
+    return _get_github_copilot_runtime_token()
 
 
 @provider_app.command("login")
@@ -1221,43 +1240,16 @@ def _login_openai_codex() -> None:
 
 @_register_login("github_copilot")
 def _login_github_copilot() -> None:
-    import asyncio
+    from nanobot.auth.github_copilot import GitHubCopilotAuthError, login_device_flow
 
-    from openai import AsyncOpenAI
-
-    console.print("[cyan]Checking GitHub Copilot access with your GitHub session...[/cyan]\n")
-
-    token = _get_github_copilot_token()
-    if not token:
-        console.print(
-            "[red]No GitHub token found.[/red] Run [bold]gh auth login[/bold] "
-            "and make sure your account has Copilot access, then try again."
-        )
-        raise typer.Exit(1)
-
-    async def _trigger():
-        client = AsyncOpenAI(
-            api_key=token,
-            base_url="https://api.githubcopilot.com",
-        )
-        await client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
-        )
-
+    console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
     try:
-        asyncio.run(_trigger())
+        login_device_flow(print_fn=console.print)
         console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
+    except GitHubCopilotAuthError as e:
+        console.print(f"[red]Authentication error: {e}[/red]")
+        raise typer.Exit(1)
     except Exception as e:
-        error_text = str(e).lower()
-        if "forbidden" in error_text or "terms of service" in error_text:
-            console.print(
-                "[red]GitHub rejected the token for Copilot access.[/red]\n"
-                "Make sure the GitHub CLI account you are using has Copilot access "
-                "and is authenticated with `gh auth login`."
-            )
-            raise typer.Exit(1)
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
 
