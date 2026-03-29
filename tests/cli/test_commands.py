@@ -10,6 +10,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _get_github_copilot_runtime_token, _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.auth.github_copilot import get_stored_token, login_device_flow, store_token
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
 
@@ -457,12 +458,25 @@ def test_config_falls_back_to_vllm_when_ollama_not_configured():
 
 
 def test_openai_compat_provider_passes_model_through():
-    from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(default_model="github-copilot/gpt-5.3-codex")
 
     assert provider.get_default_model() == "github-copilot/gpt-5.3-codex"
+
+
+def test_openai_compat_provider_normalizes_github_copilot_model_names():
+    spec = find_by_name("github-copilot")
+    assert spec is not None
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            default_model="github-copilot/gpt-5.3-codex",
+            spec=spec,
+        )
+
+    kwargs = provider._build_kwargs([], None, None, 64, 0.1, None, None)
+
+    assert kwargs["model"] == "GPT-5.3-Codex"
 
 
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():

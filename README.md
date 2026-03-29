@@ -938,7 +938,7 @@ nanobot provider login github-copilot
 {
   "agents": {
     "defaults": {
-      "model": "github-copilot/gpt-4.1"
+      "model": "github-copilot/GPT-5.3-Codex"
     }
   }
 }
