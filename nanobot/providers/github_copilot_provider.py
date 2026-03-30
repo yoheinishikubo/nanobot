@@ -137,14 +137,12 @@ class GitHubCopilotProvider(LLMProvider):
 
         args = [
             command,
-            "-i",
-            prompt,
             "--model",
             cli_model,
             "--no-color",
             "--output-format",
             "text",
-            "--allow-all"
+            "--allow-all",
         ]
 
         try:
@@ -155,10 +153,14 @@ class GitHubCopilotProvider(LLMProvider):
                     **os.environ,
                     "COPILOT_GITHUB_TOKEN": token,
                 },
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(prompt.encode("utf-8")),
+                timeout=600,
+            )
         except asyncio.TimeoutError:
             return None, "GitHub Copilot CLI timed out."
         except asyncio.CancelledError:

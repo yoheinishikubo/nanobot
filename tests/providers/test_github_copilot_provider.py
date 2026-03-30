@@ -19,7 +19,8 @@ async def test_github_copilot_provider_invokes_cli_with_model_and_token(monkeypa
     class _Proc:
         returncode = 0
 
-        async def communicate(self):
+        async def communicate(self, input=None):
+            seen["input"] = input
             return b"hello from copilot", b""
 
     async def _fake_create_subprocess_exec(*args, **kwargs):
@@ -34,11 +35,11 @@ async def test_github_copilot_provider_invokes_cli_with_model_and_token(monkeypa
 
     assert response.content == "hello from copilot"
     assert seen["args"][0] == "/usr/bin/copilot"
-    assert seen["args"][1] == "-i"
-    assert seen["args"][2].startswith("You are nanobot")
-    assert seen["args"][3:5] == ("--model", "gpt-5-mini")
+    assert seen["args"][1:3] == ("--model", "gpt-5-mini")
     assert seen["kwargs"]["cwd"] == str(tmp_path)
     assert seen["kwargs"]["env"]["COPILOT_GITHUB_TOKEN"] == "gho-token"
+    assert seen["kwargs"]["stdin"] is not None
+    assert seen["input"].startswith(b"You are nanobot")
 
 
 @pytest.mark.asyncio
@@ -51,7 +52,7 @@ async def test_github_copilot_provider_ignores_agent_model_for_cli_model(monkeyp
     class _Proc:
         returncode = 0
 
-        async def communicate(self):
+        async def communicate(self, input=None):
             return b"ok", b""
 
     async def _fake_create_subprocess_exec(*args, **kwargs):
@@ -63,7 +64,7 @@ async def test_github_copilot_provider_ignores_agent_model_for_cli_model(monkeyp
     provider = GitHubCopilotProvider(copilot_model="gpt-5-mini", working_dir=tmp_path)
     await provider.chat([{"role": "user", "content": "Say hi"}], model="gpt-4o-mini")
 
-    assert seen["args"][3:5] == ("--model", "gpt-5-mini")
+    assert seen["args"][1:3] == ("--model", "gpt-5-mini")
 
 
 @pytest.mark.asyncio
@@ -76,7 +77,7 @@ async def test_github_copilot_provider_adds_force_flag_when_enabled(monkeypatch,
     class _Proc:
         returncode = 0
 
-        async def communicate(self):
+        async def communicate(self, input=None):
             return b"ok", b""
 
     async def _fake_create_subprocess_exec(*args, **kwargs):
