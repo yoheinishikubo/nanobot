@@ -88,4 +88,4 @@ async def test_github_copilot_provider_adds_force_flag_when_enabled(monkeypatch,
     provider = GitHubCopilotProvider(copilot_model="gpt-5-mini", copilot_force=True, working_dir=tmp_path)
     await provider.chat([{"role": "user", "content": "Say hi"}])
 
-    assert "--force" in seen["args"]
+    assert "--yolo" in seen["args"]

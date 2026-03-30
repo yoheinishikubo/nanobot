@@ -946,7 +946,7 @@ nanobot provider login github-copilot
 }
 ```
 
-`model` selects the Copilot-backed provider. `copilotModel` is the actual model passed to the Copilot CLI. `copilotForce` adds `--force` to the CLI call.
+`model` selects the Copilot-backed provider. `copilotModel` is the actual model passed to the Copilot CLI. `copilotForce` adds `--yolo` to the CLI call.
 
 **3. Chat:**
 ```bash

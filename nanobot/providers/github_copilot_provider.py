@@ -146,7 +146,7 @@ class GitHubCopilotProvider(LLMProvider):
             "text",
         ]
         if self.copilot_force:
-            args.append("--force")
+            args.append("--yolo")
 
         try:
             proc = await asyncio.create_subprocess_exec(
