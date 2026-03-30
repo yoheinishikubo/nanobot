@@ -424,22 +424,17 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
-    elif backend == "openai_compat" and spec and spec.name == "github_copilot":
-        from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+    elif backend == "github_copilot":
+        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
-        token = _get_github_copilot_runtime_token()
-        if not token:
-            console.print(
-                "[red]Error: GitHub Copilot is not authenticated.[/red]\n"
-                "Run [bold]nanobot provider login github-copilot[/bold] first."
-            )
-            raise typer.Exit(1)
-        provider = OpenAICompatProvider(
-            api_key=token,
-            api_base=config.get_api_base(model),
+        provider = GitHubCopilotProvider(
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
-            spec=spec,
+            copilot_model=(
+                config.agents.defaults.copilot_model
+                or (p.copilot_model if p else None)
+                or "gpt-5-mini"
+            ),
+            working_dir=config.workspace_path,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider

@@ -10,6 +10,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _get_github_copilot_runtime_token, _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.auth.github_copilot import get_stored_token, login_device_flow, store_token
+from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -348,18 +349,28 @@ def test_github_copilot_provider_strips_model_prefix():
     spec = find_by_name("github-copilot")
     assert spec is not None
     assert spec.strip_model_prefix is True
+    assert spec.backend == "github_copilot"
+
+    provider = GitHubCopilotProvider(
+        default_model="github-copilot/gpt-5.3-codex",
+        copilot_model="gpt-5-mini",
+    )
+    assert provider._resolve_cli_model(None) == "gpt-5-mini"
+    assert provider._resolve_cli_model("github-copilot/gpt-5.2-codex") == "gpt-5-mini"
+    assert provider._resolve_cli_model("gpt-4o-mini") == "gpt-5-mini"
 
 
-def test_make_provider_uses_github_copilot_runtime_token(monkeypatch, tmp_path):
-    monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", tmp_path / "auth.json")
-    store_token("gho_runtime_token")
-
+def test_make_provider_uses_github_copilot_cli_model(monkeypatch, tmp_path):
     config = Config()
     config.agents.defaults.model = "github-copilot/gpt-5.3-codex"
+    config.agents.defaults.copilot_model = "gpt-5-mini"
+    config.agents.defaults.workspace = str(tmp_path)
 
     provider = _make_provider(config)
 
-    assert provider.api_key == "gho_runtime_token"
+    assert isinstance(provider, GitHubCopilotProvider)
+    assert provider.copilot_model == "gpt-5-mini"
+    assert provider.working_dir == tmp_path
 
 
 def test_config_dump_excludes_oauth_provider_blocks():
@@ -464,19 +475,14 @@ def test_openai_compat_provider_passes_model_through():
     assert provider.get_default_model() == "github-copilot/gpt-5.3-codex"
 
 
-def test_openai_compat_provider_normalizes_github_copilot_model_names():
-    spec = find_by_name("github-copilot")
-    assert spec is not None
+def test_github_copilot_provider_uses_configured_cli_model():
+    provider = GitHubCopilotProvider(
+        default_model="github-copilot/gpt-5.3-codex",
+        copilot_model="gpt-5-mini",
+    )
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = OpenAICompatProvider(
-            default_model="github-copilot/gpt-5.3-codex",
-            spec=spec,
-        )
-
-    kwargs = provider._build_kwargs([], None, None, 64, 0.1, None, None)
-
-    assert kwargs["model"] == "GPT-5.3-Codex"
+    assert provider._resolve_cli_model(None) == "gpt-5-mini"
+    assert provider._resolve_cli_model("github-copilot/gpt-5-mini") == "gpt-5-mini"
 
 
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():

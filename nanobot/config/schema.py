@@ -42,6 +42,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    copilot_model: str | None = None  # GitHub Copilot CLI model name
 
 
 class AgentsConfig(Base):
@@ -56,6 +57,7 @@ class ProviderConfig(Base):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    copilot_model: str = "gpt-5-mini"  # GitHub Copilot CLI model name
 
 
 class ProvidersConfig(Base):

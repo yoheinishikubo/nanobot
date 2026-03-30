@@ -12,6 +12,7 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
     monkeypatch.delitem(sys.modules, "nanobot.providers.openai_compat_provider", raising=False)
     monkeypatch.delitem(sys.modules, "nanobot.providers.openai_codex_provider", raising=False)
     monkeypatch.delitem(sys.modules, "nanobot.providers.azure_openai_provider", raising=False)
+    monkeypatch.delitem(sys.modules, "nanobot.providers.github_copilot_provider", raising=False)
 
     providers = importlib.import_module("nanobot.providers")
 
@@ -19,12 +20,14 @@ def test_importing_providers_package_is_lazy(monkeypatch) -> None:
     assert "nanobot.providers.openai_compat_provider" not in sys.modules
     assert "nanobot.providers.openai_codex_provider" not in sys.modules
     assert "nanobot.providers.azure_openai_provider" not in sys.modules
+    assert "nanobot.providers.github_copilot_provider" not in sys.modules
     assert providers.__all__ == [
         "LLMProvider",
         "LLMResponse",
         "AnthropicProvider",
         "OpenAICompatProvider",
         "OpenAICodexProvider",
+        "GitHubCopilotProvider",
         "AzureOpenAIProvider",
     ]
 

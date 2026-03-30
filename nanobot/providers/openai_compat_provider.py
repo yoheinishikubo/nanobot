@@ -31,37 +31,6 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "nanobot",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
-_GITHUB_COPILOT_MODEL_ALIASES = {
-    "gpt-4.1": "GPT-4.1",
-    "gpt-5-mini": "GPT-5 mini",
-    "gpt-5 mini": "GPT-5 mini",
-    "gpt-5.1": "GPT-5.1",
-    "gpt-5.1-codex": "GPT-5.1-Codex",
-    "gpt-5.1-codex-max": "GPT-5.1-Codex-Max",
-    "gpt-5.1-codex-mini": "GPT-5.1-Codex-Mini",
-    "gpt-5.2": "GPT-5.2",
-    "gpt-5.2-codex": "GPT-5.2-Codex",
-    "gpt-5.3-codex": "GPT-5.3-Codex",
-    "gpt-5.4": "GPT-5.4",
-    "gpt-5.4-mini": "GPT-5.4 mini",
-    "gpt-5.4 mini": "GPT-5.4 mini",
-    "claude-haiku-4.5": "Claude Haiku 4.5",
-    "claude-opus-4.5": "Claude Opus 4.5",
-    "claude-opus-4.6": "Claude Opus 4.6",
-    "claude-opus-4.6-fast-mode": "Claude Opus 4.6 (fast mode)",
-    "claude-sonnet-4": "Claude Sonnet 4",
-    "claude-sonnet-4.5": "Claude Sonnet 4.5",
-    "claude-sonnet-4.6": "Claude Sonnet 4.6",
-    "gemini-2.5-pro": "Gemini 2.5 Pro",
-    "gemini-3-flash": "Gemini 3 Flash",
-    "gemini-3-pro": "Gemini 3 Pro",
-    "gemini-3.1-pro": "Gemini 3.1 Pro",
-    "grok-code-fast-1": "Grok Code Fast 1",
-    "grok code fast 1": "Grok Code Fast 1",
-    "raptor-mini": "Raptor mini",
-    "goldeneye": "Goldeneye",
-}
-
 
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
@@ -269,8 +238,6 @@ class OpenAICompatProvider(LLMProvider):
 
         if spec and spec.strip_model_prefix:
             model_name = model_name.split("/")[-1]
-        if spec and spec.name == "github_copilot":
-            model_name = _GITHUB_COPILOT_MODEL_ALIASES.get(model_name.lower(), model_name)
 
         kwargs: dict[str, Any] = {
             "model": model_name,
