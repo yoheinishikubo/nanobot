@@ -43,6 +43,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     copilot_model: str | None = None  # GitHub Copilot CLI model name
+    copilot_force: bool = False  # Add `--force` to Copilot CLI requests
 
 
 class AgentsConfig(Base):
@@ -58,6 +59,7 @@ class ProviderConfig(Base):
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     copilot_model: str = "gpt-5-mini"  # GitHub Copilot CLI model name
+    copilot_force: bool = False  # Add `--force` to Copilot CLI requests
 
 
 class ProvidersConfig(Base):

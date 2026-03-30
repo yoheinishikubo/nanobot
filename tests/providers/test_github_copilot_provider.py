@@ -64,3 +64,28 @@ async def test_github_copilot_provider_ignores_agent_model_for_cli_model(monkeyp
     await provider.chat([{"role": "user", "content": "Say hi"}], model="gpt-4o-mini")
 
     assert seen["args"][3:5] == ("--model", "gpt-5-mini")
+
+
+@pytest.mark.asyncio
+async def test_github_copilot_provider_adds_force_flag_when_enabled(monkeypatch, tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.providers.github_copilot_provider.shutil.which", lambda _cmd: "/usr/bin/copilot")
+    monkeypatch.setattr("nanobot.providers.github_copilot_provider.get_stored_token", lambda: "gho-token")
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"ok", b""
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        seen["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr("nanobot.providers.github_copilot_provider.asyncio.create_subprocess_exec", _fake_create_subprocess_exec)
+
+    provider = GitHubCopilotProvider(copilot_model="gpt-5-mini", copilot_force=True, working_dir=tmp_path)
+    await provider.chat([{"role": "user", "content": "Say hi"}])
+
+    assert "--force" in seen["args"]

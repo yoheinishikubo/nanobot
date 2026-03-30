@@ -939,13 +939,14 @@ nanobot provider login github-copilot
   "agents": {
     "defaults": {
       "model": "github-copilot",
-      "copilotModel": "gpt-5-mini"
+      "copilotModel": "gpt-5-mini",
+      "copilotForce": true
     }
   }
 }
 ```
 
-`model` selects the Copilot-backed provider. `copilotModel` is the actual model passed to the Copilot CLI.
+`model` selects the Copilot-backed provider. `copilotModel` is the actual model passed to the Copilot CLI. `copilotForce` adds `--force` to the CLI call.
 
 **3. Chat:**
 ```bash

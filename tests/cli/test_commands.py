@@ -364,12 +364,14 @@ def test_make_provider_uses_github_copilot_cli_model(monkeypatch, tmp_path):
     config = Config()
     config.agents.defaults.model = "github-copilot/gpt-5.3-codex"
     config.agents.defaults.copilot_model = "gpt-5-mini"
+    config.agents.defaults.copilot_force = True
     config.agents.defaults.workspace = str(tmp_path)
 
     provider = _make_provider(config)
 
     assert isinstance(provider, GitHubCopilotProvider)
     assert provider.copilot_model == "gpt-5-mini"
+    assert provider.copilot_force is True
     assert provider.working_dir == tmp_path
 
 

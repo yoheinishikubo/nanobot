@@ -20,12 +20,14 @@ class GitHubCopilotProvider(LLMProvider):
         self,
         default_model: str = "github-copilot/gpt-5-mini",
         copilot_model: str = "gpt-5-mini",
+        copilot_force: bool = False,
         working_dir: Path | None = None,
         cli_command: str = "copilot",
     ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
         self.copilot_model = copilot_model
+        self.copilot_force = copilot_force
         self.working_dir = working_dir
         self.cli_command = cli_command
 
@@ -143,6 +145,8 @@ class GitHubCopilotProvider(LLMProvider):
             "--output-format",
             "text",
         ]
+        if self.copilot_force:
+            args.append("--force")
 
         try:
             proc = await asyncio.create_subprocess_exec(

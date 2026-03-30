@@ -434,6 +434,10 @@ def _make_provider(config: Config):
                 or (p.copilot_model if p else None)
                 or "gpt-5-mini"
             ),
+            copilot_force=(
+                config.agents.defaults.copilot_force
+                or (p.copilot_force if p else False)
+            ),
             working_dir=config.workspace_path,
         )
     else:
