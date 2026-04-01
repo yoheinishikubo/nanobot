@@ -143,6 +143,7 @@ class GitHubCopilotProvider(LLMProvider):
             "--output-format",
             "text",
             "--allow-all",
+            "--continue",
         ]
 
         try:
