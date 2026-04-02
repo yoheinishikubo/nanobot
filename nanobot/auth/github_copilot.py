@@ -1,23 +1,26 @@
-"""GitHub Copilot OAuth/device-flow helpers."""
+"""GitHub Copilot OAuth/device-flow helpers.
+
+Uses the unified AuthManager for credential storage.
+Legacy github_copilot.json is automatically migrated.
+"""
 
 from __future__ import annotations
 
-import json
-import os
-import secrets
 import time
 import webbrowser
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 
+from nanobot.auth.manager import get_auth_manager
+
 COPILOT_CLIENT_ID = "Ov23ctDVkRmgkPke0Mmm"
 COPILOT_SCOPES = "read:user,read:org,repo,gist"
 DEFAULT_HOST = "github.com"
-AUTH_STATE_PATH = Path.home() / ".nanobot" / "auth" / "github_copilot.json"
+LEGACY_AUTH_STATE_PATH = Path.home() / ".nanobot" / "auth" / "github_copilot.json"
+PROVIDER_NAME = "github_copilot"
 
 
 class GitHubCopilotAuthError(RuntimeError):
@@ -61,58 +64,45 @@ def _api_base_url(host: str | None = None) -> str:
     return f"https://api.{host_value}"
 
 
-def _state_path() -> Path:
-    return AUTH_STATE_PATH
+def _maybe_migrate_legacy_token(host: str | None = None) -> str | None:
+    """Migrate token from legacy github_copilot.json if present."""
+    host_key = _normalize_host(host)
+    auth_manager = get_auth_manager()
 
+    # Check if already migrated
+    existing = auth_manager.get_token(PROVIDER_NAME, host_key)
+    if existing:
+        return existing.access_token
 
-def _load_state() -> dict[str, dict[str, str]]:
-    path = _state_path()
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    state: dict[str, dict[str, str]] = {}
-    for host, entry in data.items():
-        if isinstance(host, str) and isinstance(entry, dict):
-            token = entry.get("access_token")
-            if isinstance(token, str) and token:
-                state[host] = {"access_token": token}
-    return state
+    # Try to migrate from legacy file
+    if LEGACY_AUTH_STATE_PATH.exists():
+        if auth_manager.migrate_from_legacy(
+            LEGACY_AUTH_STATE_PATH, PROVIDER_NAME, host_key
+        ):
+            # Return the migrated token
+            migrated = auth_manager.get_token(PROVIDER_NAME, host_key)
+            if migrated:
+                return migrated.access_token
 
-
-def _save_state(state: dict[str, dict[str, str]]) -> None:
-    path = _state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(f".{secrets.token_hex(8)}.tmp")
-    payload = json.dumps(state, indent=2, ensure_ascii=False)
-    tmp_path.write_text(payload, encoding="utf-8")
-    try:
-        os.chmod(tmp_path, 0o600)
-    except OSError:
-        pass
-    os.replace(tmp_path, path)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    return None
 
 
 def get_stored_token(host: str | None = None) -> str | None:
-    state = _load_state()
+    """Get stored Copilot token, migrating from legacy if needed."""
     host_key = _normalize_host(host)
-    entry = state.get(host_key)
-    if entry and entry.get("access_token"):
-        return entry["access_token"]
-    return None
+    auth_manager = get_auth_manager()
+
+    # Try unified storage first
+    entry = auth_manager.get_token(PROVIDER_NAME, host_key)
+    if entry:
+        return entry.access_token
+
+    # Try legacy migration
+    return _maybe_migrate_legacy_token(host)
 
 
 def get_runtime_token(host: str | None = None) -> str | None:
     """Resolve a Copilot token for API requests from stored login state."""
-
     return get_stored_token(host)
 
 
@@ -229,13 +219,10 @@ def validate_token(token: str, host: str | None = None) -> dict[str, object]:
 
 
 def store_token(token: str, host: str | None = None) -> None:
+    """Store Copilot token using unified AuthManager."""
     host_key = _normalize_host(host)
-    state = _load_state()
-    state[host_key] = {
-        "access_token": token,
-        "updated_at": datetime.now(UTC).isoformat(),
-    }
-    _save_state(state)
+    auth_manager = get_auth_manager()
+    auth_manager.set_token(PROVIDER_NAME, host_key, token)
 
 
 def login_device_flow(
