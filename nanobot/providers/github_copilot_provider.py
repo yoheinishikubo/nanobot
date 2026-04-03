@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,15 @@ class GitHubCopilotProvider(LLMProvider):
         default_model: str = "github-copilot/gpt-5-mini",
         copilot_model: str = "gpt-5-mini",
         copilot_force: bool = False,
+        copilot_allow_all: bool = True,
+        copilot_continue: bool = True,
+        copilot_autopilot: bool = False,
+        copilot_no_ask_user: bool = False,
+        copilot_max_autopilot_continues: int | None = None,
+        copilot_available_tools: list[str] | None = None,
+        copilot_excluded_tools: list[str] | None = None,
+        copilot_no_custom_instructions: bool = False,
+        copilot_experimental: bool = False,
         working_dir: Path | None = None,
         cli_command: str = "copilot",
     ):
@@ -28,6 +37,15 @@ class GitHubCopilotProvider(LLMProvider):
         self.default_model = default_model
         self.copilot_model = copilot_model
         self.copilot_force = copilot_force
+        self.copilot_allow_all = copilot_allow_all
+        self.copilot_continue = copilot_continue
+        self.copilot_autopilot = copilot_autopilot
+        self.copilot_no_ask_user = copilot_no_ask_user
+        self.copilot_max_autopilot_continues = copilot_max_autopilot_continues
+        self.copilot_available_tools = copilot_available_tools
+        self.copilot_excluded_tools = copilot_excluded_tools
+        self.copilot_no_custom_instructions = copilot_no_custom_instructions
+        self.copilot_experimental = copilot_experimental
         self.working_dir = working_dir
         self.cli_command = cli_command
 
@@ -46,7 +64,7 @@ class GitHubCopilotProvider(LLMProvider):
     ) -> LLMResponse:
         prompt = self._build_prompt(messages)
         cli_model = self._resolve_cli_model(model)
-        content, error = await self._run_cli(prompt, cli_model)
+        content, error = await self._run_cli(prompt, cli_model, reasoning_effort=reasoning_effort)
         if error:
             return LLMResponse(content=error, finish_reason="error")
         return LLMResponse(content=content)
@@ -121,7 +139,7 @@ class GitHubCopilotProvider(LLMProvider):
             return json.dumps(content, ensure_ascii=False)
         return str(content)
 
-    async def _run_cli(self, prompt: str, cli_model: str) -> tuple[str | None, str | None]:
+    async def _run_cli(self, prompt: str, cli_model: str, reasoning_effort: str | None = None) -> tuple[str | None, str | None]:
         command = shutil.which(self.cli_command)
         if not command:
             return None, (
@@ -142,9 +160,28 @@ class GitHubCopilotProvider(LLMProvider):
             "--no-color",
             "--output-format",
             "text",
-            "--allow-all",
-            "--continue",
         ]
+
+        if self.copilot_allow_all:
+            args.append("--allow-all")
+        if self.copilot_continue:
+            args.append("--continue")
+        if self.copilot_autopilot:
+            args.append("--autopilot")
+        if self.copilot_no_ask_user:
+            args.append("--no-ask-user")
+        if self.copilot_max_autopilot_continues is not None:
+            args += ["--max-autopilot-continues", str(self.copilot_max_autopilot_continues)]
+        if self.copilot_available_tools:
+            args += ["--available-tools", ",".join(self.copilot_available_tools)]
+        if self.copilot_excluded_tools:
+            args += ["--excluded-tools", ",".join(self.copilot_excluded_tools)]
+        if self.copilot_no_custom_instructions:
+            args.append("--no-custom-instructions")
+        if self.copilot_experimental:
+            args.append("--experimental")
+        if reasoning_effort:
+            args += ["--reasoning-effort", reasoning_effort]
 
         try:
             proc = await asyncio.create_subprocess_exec(

@@ -44,6 +44,15 @@ class AgentDefaults(Base):
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     copilot_model: str | None = None  # GitHub Copilot CLI model name
     copilot_force: bool = False  # Add `--force` to Copilot CLI requests
+    copilot_allow_all: bool = True  # Pass --allow-all to Copilot CLI
+    copilot_continue: bool = True  # Pass --continue to Copilot CLI (resume last session)
+    copilot_autopilot: bool = False  # Pass --autopilot (auto-continue until task is done)
+    copilot_no_ask_user: bool = False  # Pass --no-ask-user (disable ask_user tool; fully autonomous)
+    copilot_max_autopilot_continues: int | None = None  # Pass --max-autopilot-continues <n>
+    copilot_available_tools: list[str] | None = None  # Pass --available-tools (restrict tools)
+    copilot_excluded_tools: list[str] | None = None  # Pass --excluded-tools (exclude tools)
+    copilot_no_custom_instructions: bool = False  # Pass --no-custom-instructions (ignore AGENTS.md etc.)
+    copilot_experimental: bool = False  # Pass --experimental (enable experimental features)
 
 
 class AgentsConfig(Base):
@@ -60,6 +69,15 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     copilot_model: str = "gpt-5-mini"  # GitHub Copilot CLI model name
     copilot_force: bool = False  # Add `--force` to Copilot CLI requests
+    copilot_allow_all: bool = True
+    copilot_continue: bool = True
+    copilot_autopilot: bool = False
+    copilot_no_ask_user: bool = False
+    copilot_max_autopilot_continues: int | None = None
+    copilot_available_tools: list[str] | None = None
+    copilot_excluded_tools: list[str] | None = None
+    copilot_no_custom_instructions: bool = False
+    copilot_experimental: bool = False
 
 
 class ProvidersConfig(Base):

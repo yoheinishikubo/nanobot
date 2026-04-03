@@ -438,6 +438,42 @@ def _make_provider(config: Config):
                 config.agents.defaults.copilot_force
                 or (p.copilot_force if p else False)
             ),
+            copilot_allow_all=(
+                config.agents.defaults.copilot_allow_all
+                if not (p and not p.copilot_allow_all) else p.copilot_allow_all
+            ),
+            copilot_continue=(
+                config.agents.defaults.copilot_continue
+                if not (p and not p.copilot_continue) else p.copilot_continue
+            ),
+            copilot_autopilot=(
+                config.agents.defaults.copilot_autopilot
+                or (p.copilot_autopilot if p else False)
+            ),
+            copilot_no_ask_user=(
+                config.agents.defaults.copilot_no_ask_user
+                or (p.copilot_no_ask_user if p else False)
+            ),
+            copilot_max_autopilot_continues=(
+                config.agents.defaults.copilot_max_autopilot_continues
+                or (p.copilot_max_autopilot_continues if p else None)
+            ),
+            copilot_available_tools=(
+                config.agents.defaults.copilot_available_tools
+                or (p.copilot_available_tools if p else None)
+            ),
+            copilot_excluded_tools=(
+                config.agents.defaults.copilot_excluded_tools
+                or (p.copilot_excluded_tools if p else None)
+            ),
+            copilot_no_custom_instructions=(
+                config.agents.defaults.copilot_no_custom_instructions
+                or (p.copilot_no_custom_instructions if p else False)
+            ),
+            copilot_experimental=(
+                config.agents.defaults.copilot_experimental
+                or (p.copilot_experimental if p else False)
+            ),
             working_dir=config.workspace_path,
         )
     else:
