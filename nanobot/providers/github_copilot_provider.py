@@ -48,9 +48,15 @@ class GitHubCopilotProvider(LLMProvider):
         self.copilot_experimental = copilot_experimental
         self.working_dir = working_dir
         self.cli_command = cli_command
+        # When True, skip --continue on the next call to avoid resuming a broken session.
+        # Reset to False after a successful call.
+        self._session_broken: bool = False
 
     def get_default_model(self) -> str:
         return self.default_model
+
+    # Errors that indicate the --continue session is broken and should be retried fresh.
+    _BROKEN_SESSION_MARKERS = ("timed out", "no tool output found", "capiError: 400", "400 no tool")
 
     async def chat(
         self,
@@ -64,17 +70,28 @@ class GitHubCopilotProvider(LLMProvider):
     ) -> LLMResponse:
         prompt = self._build_prompt(messages)
         cli_model = self._resolve_cli_model(model)
-        content, error = await self._run_cli(prompt, cli_model, reasoning_effort=reasoning_effort)
-        if error and "timed out" in error.lower() and self.copilot_continue:
-            # After a timeout the server may have an open tool call with no result.
-            # Retry immediately without --continue to start a fresh session and
-            # avoid a CAPIError 400 "No tool output found".
+        # Skip --continue if the previous session was broken to avoid hanging on ghost state.
+        use_continue = self.copilot_continue and not self._session_broken
+        content, error = await self._run_cli(
+            prompt, cli_model, reasoning_effort=reasoning_effort, use_continue=use_continue
+        )
+        if error and self.copilot_continue and not self._session_broken and self._is_broken_session(error):
+            # Session was broken (timeout / CAPIError). Mark it and retry fresh.
+            self._session_broken = True
             content, error = await self._run_cli(
                 prompt, cli_model, reasoning_effort=reasoning_effort, use_continue=False
             )
         if error:
+            self._session_broken = self._is_broken_session(error)
             return LLMResponse(content=error, finish_reason="error")
+        self._session_broken = False
         return LLMResponse(content=content)
+
+    @classmethod
+    def _is_broken_session(cls, error: str) -> bool:
+        err = error.lower()
+        return any(marker.lower() in err for marker in cls._BROKEN_SESSION_MARKERS)
+
 
     async def chat_stream(
         self,
