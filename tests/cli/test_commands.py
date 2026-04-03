@@ -355,9 +355,7 @@ def test_github_copilot_cli_provider_strips_model_prefix():
         default_model="github-copilot/gpt-5.3-codex",
         copilot_model="gpt-5-mini",
     )
-    assert provider._resolve_cli_model(None) == "gpt-5-mini"
-    assert provider._resolve_cli_model("github-copilot/gpt-5.2-codex") == "gpt-5-mini"
-    assert provider._resolve_cli_model("gpt-4o-mini") == "gpt-5-mini"
+    assert provider.copilot_model == "gpt-5-mini"
 
 
 def test_make_provider_uses_github_copilot_cli_model(monkeypatch, tmp_path):
@@ -483,8 +481,7 @@ def test_github_copilot_cli_provider_uses_configured_cli_model():
         copilot_model="gpt-5-mini",
     )
 
-    assert provider._resolve_cli_model(None) == "gpt-5-mini"
-    assert provider._resolve_cli_model("github-copilot/gpt-5-mini") == "gpt-5-mini"
+    assert provider.copilot_model == "gpt-5-mini"
 
 
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():

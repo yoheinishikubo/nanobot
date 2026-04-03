@@ -1,145 +1,281 @@
-"""Tests for the GitHub Copilot CLI provider (GitHubCopilotCLIProvider)."""
+"""Tests for the GitHub Copilot CLI provider (ACP-based GitHubCopilotCLIProvider)."""
 
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from nanobot.providers.github_copilot_cli_provider import GitHubCopilotCLIProvider
+from nanobot.providers.github_copilot_cli_provider import (
+    GitHubCopilotCLIProvider,
+    _JsonRpcConnection,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers – fake ACP subprocess
+# ---------------------------------------------------------------------------
+
+def _encode_rpc(msg: dict[str, Any]) -> bytes:
+    """Encode a JSON-RPC message with LSP Content-Length header."""
+    body = json.dumps(msg, ensure_ascii=False).encode("utf-8")
+    header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+    return header + body
+
+
+class _FakeStdin:
+    """Captures writes and parses JSON-RPC requests to auto-respond."""
+
+    def __init__(self, auto_responses: dict[str, Any] | None = None, notifications: list[dict[str, Any]] | None = None) -> None:
+        self.written = bytearray()
+        self._auto_responses = auto_responses or {}
+        self._notifications = notifications or []
+        self._stdout_ref: _FakeStdout | None = None
+        self._buf = b""
+
+    def write(self, data: bytes) -> None:
+        self.written.extend(data)
+        self._buf += data
+        # Parse incoming requests and auto-respond
+        while True:
+            header_end = self._buf.find(b"\r\n\r\n")
+            if header_end == -1:
+                break
+            header_part = self._buf[:header_end].decode("ascii", "ignore")
+            content_length = 0
+            for line in header_part.split("\r\n"):
+                if line.lower().startswith("content-length:"):
+                    content_length = int(line.split(":", 1)[1].strip())
+            body_start = header_end + 4
+            if len(self._buf) < body_start + content_length:
+                break
+            body = self._buf[body_start : body_start + content_length]
+            self._buf = self._buf[body_start + content_length:]
+            try:
+                msg = json.loads(body)
+            except json.JSONDecodeError:
+                continue
+            if "id" in msg and "method" in msg:
+                self._handle_request(msg)
+
+    def _handle_request(self, msg: dict[str, Any]) -> None:
+        method = msg["method"]
+        msg_id = msg["id"]
+        if method in self._auto_responses:
+            result = self._auto_responses[method]
+            if callable(result):
+                result = result(msg.get("params", {}))
+            response = {"jsonrpc": "2.0", "id": msg_id, "result": result}
+            if self._stdout_ref:
+                self._stdout_ref.inject(_encode_rpc(response))
+                # If this is session.send, also inject notifications
+                if method == "session.send":
+                    for notif in self._notifications:
+                        self._stdout_ref.inject(_encode_rpc(notif))
+
+
+class _FakeStdout:
+    """Async readable that allows injecting data dynamically."""
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self._closed = False
+
+    def inject(self, data: bytes) -> None:
+        """Inject data to be read."""
+        self._queue.put_nowait(data)
+
+    def close(self) -> None:
+        self._closed = True
+        self._queue.put_nowait(b"")
+
+    async def read(self, n: int) -> bytes:
+        try:
+            data = await asyncio.wait_for(self._queue.get(), timeout=5)
+            return data
+        except asyncio.TimeoutError:
+            return b""
+
+
+class _FakeProc:
+    """Fake asyncio.subprocess.Process with auto-response capabilities."""
+
+    returncode: int | None = None
+
+    def __init__(
+        self,
+        auto_responses: dict[str, Any] | None = None,
+        notifications: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.stdout = _FakeStdout()
+        self.stdin = _FakeStdin(auto_responses, notifications)
+        self.stdin._stdout_ref = self.stdout
+        self.stderr = None
+
+    def terminate(self) -> None:
+        self.returncode = 0
+        self.stdout.close()
+
+    def kill(self) -> None:
+        self.returncode = -9
+        self.stdout.close()
+
+    async def wait(self) -> int:
+        return self.returncode or 0
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+_PING_RESULT = {"message": "nanobot", "timestamp": 0, "protocolVersion": 2}
 
 
 @pytest.mark.asyncio
-async def test_github_copilot_cli_provider_invokes_cli_with_model_and_token(monkeypatch, tmp_path: Path) -> None:
-    seen: dict[str, object] = {}
+async def test_json_rpc_connection_send_and_receive() -> None:
+    """The JSON-RPC connection sends requests and resolves futures from responses."""
+    proc = _FakeProc(auto_responses={"ping": {"message": "pong", "timestamp": 123, "protocolVersion": 2}})
+    conn = _JsonRpcConnection(proc)
+    conn.start()
 
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.shutil.which", lambda _cmd: "/usr/bin/copilot")
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.get_stored_token", lambda: "gho-token")
+    result = await asyncio.wait_for(conn.send_request("ping", {"message": "hello"}), timeout=2)
+    assert result["message"] == "pong"
 
-    class _Proc:
-        returncode = 0
+    await conn.close()
+    proc.terminate()
 
-        async def communicate(self, input=None):
-            seen["input"] = input
-            return b"hello from copilot", b""
 
-    async def _fake_create_subprocess_exec(*args, **kwargs):
-        seen["args"] = args
-        seen["kwargs"] = kwargs
-        return _Proc()
+@pytest.mark.asyncio
+async def test_json_rpc_connection_handles_notifications() -> None:
+    """Notifications from the server are dispatched to registered handlers."""
+    proc = _FakeProc()
+    conn = _JsonRpcConnection(proc)
 
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.asyncio.create_subprocess_exec", _fake_create_subprocess_exec)
+    received: list[Any] = []
+    conn.on_notification("session.event", lambda p: received.append(p))
+    conn.start()
+
+    # Inject a notification
+    proc.stdout.inject(_encode_rpc({
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {"type": "session.idle", "data": {}},
+    }))
+
+    await asyncio.sleep(0.1)
+    assert len(received) == 1
+    assert received[0]["type"] == "session.idle"
+
+    await conn.close()
+    proc.terminate()
+
+
+@pytest.mark.asyncio
+async def test_json_rpc_connection_handles_server_requests() -> None:
+    """Server→client requests are handled and responses sent back."""
+    proc = _FakeProc()
+    conn = _JsonRpcConnection(proc)
+    conn.on_request("permission.request", lambda p: {"result": "allow"})
+    conn.start()
+
+    # Inject a server→client request
+    proc.stdout.inject(_encode_rpc({
+        "jsonrpc": "2.0", "id": 42,
+        "method": "permission.request",
+        "params": {"kind": "shell"},
+    }))
+
+    await asyncio.sleep(0.1)
+
+    # Check that a response was written back
+    written = bytes(proc.stdin.written)
+    assert b'"id": 42' in written or b'"id":42' in written
+    assert b'"allow"' in written
+
+    await conn.close()
+    proc.terminate()
+
+
+def _make_provider_proc(
+    notifications: list[dict[str, Any]] | None = None,
+) -> _FakeProc:
+    """Create a _FakeProc pre-configured for provider tests."""
+    return _FakeProc(
+        auto_responses={
+            "ping": _PING_RESULT,
+            "session.create": {},
+            "session.send": {"messageId": "msg-1"},
+        },
+        notifications=notifications,
+    )
+
+
+@pytest.mark.asyncio
+async def test_provider_chat_via_acp(monkeypatch, tmp_path: Path) -> None:
+    """Full end-to-end: provider sends prompt via ACP and receives streamed response."""
+    notifications = [
+        {"jsonrpc": "2.0", "method": "session.event", "params": {
+            "event": {"type": "assistant.message_delta", "data": {"messageId": "msg-1", "deltaContent": "Hello "}},
+        }},
+        {"jsonrpc": "2.0", "method": "session.event", "params": {
+            "event": {"type": "assistant.message_delta", "data": {"messageId": "msg-1", "deltaContent": "world"}},
+        }},
+        {"jsonrpc": "2.0", "method": "session.event", "params": {
+            "event": {"type": "session.idle", "data": {}},
+        }},
+    ]
+
+    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.shutil.which", lambda _: "/usr/bin/copilot")
+
+    async def _fake_subprocess(*args, **kwargs):
+        return _make_provider_proc(notifications)
+
+    monkeypatch.setattr(
+        "nanobot.providers.github_copilot_cli_provider.asyncio.create_subprocess_exec",
+        _fake_subprocess,
+    )
 
     provider = GitHubCopilotCLIProvider(working_dir=tmp_path)
     response = await provider.chat([{"role": "user", "content": "Say hi"}])
 
-    assert response.content == "hello from copilot"
-    assert seen["args"][0] == "/usr/bin/copilot"
-    assert seen["args"][1:3] == ("--model", "gpt-5-mini")
-    assert seen["kwargs"]["cwd"] == str(tmp_path)
-    assert seen["kwargs"]["env"]["COPILOT_GITHUB_TOKEN"] == "gho-token"
-    assert seen["kwargs"]["stdin"] is not None
-    assert seen["input"].startswith(b"You are nanobot")
+    assert response.content == "Hello world"
+    assert response.finish_reason == "stop"
 
 
-@pytest.mark.asyncio
-async def test_github_copilot_cli_provider_ignores_agent_model_for_cli_model(monkeypatch, tmp_path: Path) -> None:
-    seen: dict[str, object] = {}
-
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.shutil.which", lambda _cmd: "/usr/bin/copilot")
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.get_stored_token", lambda: "gho-token")
-
-    class _Proc:
-        returncode = 0
-
-        async def communicate(self, input=None):
-            return b"ok", b""
-
-    async def _fake_create_subprocess_exec(*args, **kwargs):
-        seen["args"] = args
-        return _Proc()
-
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.asyncio.create_subprocess_exec", _fake_create_subprocess_exec)
-
-    provider = GitHubCopilotCLIProvider(copilot_model="gpt-5-mini", working_dir=tmp_path)
-    await provider.chat([{"role": "user", "content": "Say hi"}], model="gpt-4o-mini")
-
-    assert seen["args"][1:3] == ("--model", "gpt-5-mini")
-
-
-@pytest.mark.asyncio
-async def test_github_copilot_cli_provider_adds_force_flag_when_enabled(monkeypatch, tmp_path: Path) -> None:
-    seen: dict[str, object] = {}
-
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.shutil.which", lambda _cmd: "/usr/bin/copilot")
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.get_stored_token", lambda: "gho-token")
-
-    class _Proc:
-        returncode = 0
-
-        async def communicate(self, input=None):
-            return b"ok", b""
-
-    async def _fake_create_subprocess_exec(*args, **kwargs):
-        seen["args"] = args
-        return _Proc()
-
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.asyncio.create_subprocess_exec", _fake_create_subprocess_exec)
-
-    provider = GitHubCopilotCLIProvider(copilot_model="gpt-5-mini", copilot_force=True, working_dir=tmp_path)
-    await provider.chat([{"role": "user", "content": "Say hi"}])
-
-    assert "--yolo" in seen["args"]
-
-
-async def _async_append(lst, item):
+async def _async_append(lst: list[str], item: str) -> None:
     lst.append(item)
 
 
 @pytest.mark.asyncio
-async def test_github_copilot_cli_provider_streams_stdout_chunks(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.shutil.which", lambda _cmd: "/usr/bin/copilot")
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.get_stored_token", lambda: "gho-token")
+async def test_provider_chat_stream_via_acp(monkeypatch, tmp_path: Path) -> None:
+    """Provider streams deltas via on_content_delta callback."""
+    notifications = [
+        {"jsonrpc": "2.0", "method": "session.event", "params": {
+            "event": {"type": "assistant.message_delta", "data": {"messageId": "msg-1", "deltaContent": "hello "}},
+        }},
+        {"jsonrpc": "2.0", "method": "session.event", "params": {
+            "event": {"type": "assistant.message_delta", "data": {"messageId": "msg-1", "deltaContent": "from "}},
+        }},
+        {"jsonrpc": "2.0", "method": "session.event", "params": {
+            "event": {"type": "assistant.message_delta", "data": {"messageId": "msg-1", "deltaContent": "copilot"}},
+        }},
+        {"jsonrpc": "2.0", "method": "session.event", "params": {
+            "event": {"type": "session.idle", "data": {}},
+        }},
+    ]
 
-    class _FakeStdin:
-        def write(self, data):
-            pass
+    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.shutil.which", lambda _: "/usr/bin/copilot")
 
-        async def drain(self):
-            pass
+    async def _fake_subprocess(*args, **kwargs):
+        return _make_provider_proc(notifications)
 
-        def close(self):
-            pass
-
-    class _FakeStdout:
-        def __init__(self):
-            self._chunks = [b"hello ", b"from ", b"copilot"]
-            self._index = 0
-
-        async def read(self, n):
-            if self._index >= len(self._chunks):
-                return b""
-            chunk = self._chunks[self._index]
-            self._index += 1
-            return chunk
-
-    class _FakeStderr:
-        async def read(self):
-            return b""
-
-    class _Proc:
-        returncode = 0
-        stdin = _FakeStdin()
-        stdout = _FakeStdout()
-        stderr = _FakeStderr()
-
-        async def wait(self):
-            pass
-
-    async def _fake_create_subprocess_exec(*args, **kwargs):
-        return _Proc()
-
-    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.asyncio.create_subprocess_exec", _fake_create_subprocess_exec)
+    monkeypatch.setattr(
+        "nanobot.providers.github_copilot_cli_provider.asyncio.create_subprocess_exec",
+        _fake_subprocess,
+    )
 
     provider = GitHubCopilotCLIProvider(working_dir=tmp_path)
     deltas: list[str] = []
@@ -150,3 +286,41 @@ async def test_github_copilot_cli_provider_streams_stdout_chunks(monkeypatch, tm
 
     assert deltas == ["hello ", "from ", "copilot"]
     assert response.content == "hello from copilot"
+
+
+@pytest.mark.asyncio
+async def test_provider_handles_acp_error(monkeypatch, tmp_path: Path) -> None:
+    """Provider returns error when ACP session reports an error."""
+    notifications = [
+        {"jsonrpc": "2.0", "method": "session.event", "params": {
+            "event": {"type": "session.error", "data": {"message": "Rate limit exceeded"}},
+        }},
+    ]
+
+    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.shutil.which", lambda _: "/usr/bin/copilot")
+
+    async def _fake_subprocess(*args, **kwargs):
+        return _make_provider_proc(notifications)
+
+    monkeypatch.setattr(
+        "nanobot.providers.github_copilot_cli_provider.asyncio.create_subprocess_exec",
+        _fake_subprocess,
+    )
+
+    provider = GitHubCopilotCLIProvider(working_dir=tmp_path)
+    response = await provider.chat([{"role": "user", "content": "test"}])
+
+    assert response.finish_reason == "error"
+    assert "Rate limit exceeded" in (response.content or "")
+
+
+@pytest.mark.asyncio
+async def test_provider_cli_not_found(monkeypatch, tmp_path: Path) -> None:
+    """Provider returns error when copilot CLI is not found."""
+    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.shutil.which", lambda _: None)
+
+    provider = GitHubCopilotCLIProvider(working_dir=tmp_path)
+    response = await provider.chat([{"role": "user", "content": "test"}])
+
+    assert response.finish_reason == "error"
+    assert "not installed" in (response.content or "")
