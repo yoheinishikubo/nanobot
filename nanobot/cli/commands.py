@@ -424,10 +424,10 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
         )
-    elif backend == "github_copilot":
-        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+    elif backend == "github_copilot_cli":
+        from nanobot.providers.github_copilot_cli_provider import GitHubCopilotCLIProvider
 
-        provider = GitHubCopilotProvider(
+        provider = GitHubCopilotCLIProvider(
             default_model=model,
             copilot_model=(
                 config.agents.defaults.copilot_model
@@ -1263,8 +1263,8 @@ def status():
             if p is None:
                 continue
             if spec.is_oauth:
-                if spec.name == "github_copilot":
-                    if _get_github_copilot_runtime_token():
+                if spec.name == "github_copilot_cli":
+                    if _get_github_copilot_cli_runtime_token():
                         console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
                     else:
                         console.print(f"{spec.label}: [dim]not logged in[/dim]")
@@ -1299,16 +1299,16 @@ def _register_login(name: str):
     return decorator
 
 
-def _get_github_copilot_runtime_token() -> str | None:
-    """Resolve a GitHub Copilot token for runtime API requests."""
+def _get_github_copilot_cli_runtime_token() -> str | None:
+    """Resolve a GitHub Copilot CLI token for runtime API requests."""
     from nanobot.auth.github_copilot import get_runtime_token
 
     return get_runtime_token()
 
 
-def _get_github_copilot_token() -> str | None:
-    """Backward-compatible alias for the Copilot runtime token helper."""
-    return _get_github_copilot_runtime_token()
+def _get_github_copilot_cli_token() -> str | None:
+    """Backward-compatible alias for the Copilot CLI runtime token helper."""
+    return _get_github_copilot_cli_runtime_token()
 
 
 @provider_app.command("login")
@@ -1318,7 +1318,9 @@ def provider_login(
     """Authenticate with an OAuth provider."""
     from nanobot.providers.registry import PROVIDERS
 
+    _LOGIN_ALIASES = {"github_copilot": "github_copilot_cli"}
     key = provider.replace("-", "_")
+    key = _LOGIN_ALIASES.get(key, key)
     spec = next((s for s in PROVIDERS if s.name == key and s.is_oauth), None)
     if not spec:
         names = ", ".join(s.name.replace("_", "-") for s in PROVIDERS if s.is_oauth)
@@ -1358,7 +1360,7 @@ def _login_openai_codex() -> None:
         raise typer.Exit(1)
 
 
-@_register_login("github_copilot")
+@_register_login("github_copilot_cli")
 def _login_github_copilot() -> None:
     from nanobot.auth.github_copilot import GitHubCopilotAuthError, login_device_flow
 

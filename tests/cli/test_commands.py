@@ -7,10 +7,10 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import _get_github_copilot_runtime_token, _make_provider, app
+from nanobot.cli.commands import _get_github_copilot_cli_runtime_token, _make_provider, app
 from nanobot.config.schema import Config
 from nanobot.auth.github_copilot import get_stored_token, login_device_flow, store_token
-from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+from nanobot.providers.github_copilot_cli_provider import GitHubCopilotCLIProvider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -206,7 +206,7 @@ def test_config_matches_github_copilot_codex_with_hyphen_prefix():
     config = Config()
     config.agents.defaults.model = "github-copilot/gpt-5.3-codex"
 
-    assert config.get_provider_name() == "github_copilot"
+    assert config.get_provider_name() == "github_copilot_cli"
 
 
 def test_config_matches_openai_codex_with_hyphen_prefix():
@@ -223,7 +223,7 @@ def test_github_copilot_runtime_token_ignores_env(monkeypatch, tmp_path):
     monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", tmp_path / "auth.json")
     store_token("gho_stored_token")
 
-    assert _get_github_copilot_runtime_token() == "gho_stored_token"
+    assert _get_github_copilot_cli_runtime_token() == "gho_stored_token"
 
 
 def test_github_copilot_runtime_token_falls_back_to_stored_token(monkeypatch, tmp_path):
@@ -233,7 +233,7 @@ def test_github_copilot_runtime_token_falls_back_to_stored_token(monkeypatch, tm
     monkeypatch.setattr("nanobot.auth.github_copilot.AUTH_STATE_PATH", tmp_path / "auth.json")
     store_token("gho_stored_token")
 
-    assert _get_github_copilot_runtime_token() == "gho_stored_token"
+    assert _get_github_copilot_cli_runtime_token() == "gho_stored_token"
 
 
 def test_github_copilot_device_flow_saves_token(monkeypatch, tmp_path):
@@ -345,13 +345,13 @@ def test_github_copilot_login_command_uses_device_flow(monkeypatch, tmp_path):
     assert "Authenticated with GitHub Copilot" in result.stdout
 
 
-def test_github_copilot_provider_strips_model_prefix():
-    spec = find_by_name("github-copilot")
+def test_github_copilot_cli_provider_strips_model_prefix():
+    spec = find_by_name("github-copilot-cli")
     assert spec is not None
     assert spec.strip_model_prefix is True
-    assert spec.backend == "github_copilot"
+    assert spec.backend == "github_copilot_cli"
 
-    provider = GitHubCopilotProvider(
+    provider = GitHubCopilotCLIProvider(
         default_model="github-copilot/gpt-5.3-codex",
         copilot_model="gpt-5-mini",
     )
@@ -369,7 +369,7 @@ def test_make_provider_uses_github_copilot_cli_model(monkeypatch, tmp_path):
 
     provider = _make_provider(config)
 
-    assert isinstance(provider, GitHubCopilotProvider)
+    assert isinstance(provider, GitHubCopilotCLIProvider)
     assert provider.copilot_model == "gpt-5-mini"
     assert provider.copilot_force is True
     assert provider.working_dir == tmp_path
@@ -425,8 +425,8 @@ def test_config_accepts_camel_case_explicit_provider_name_for_coding_plan():
 def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("volcengineCodingPlan") is not None
     assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
-    assert find_by_name("github-copilot") is not None
-    assert find_by_name("github-copilot").name == "github_copilot"
+    assert find_by_name("github-copilot-cli") is not None
+    assert find_by_name("github-copilot-cli").name == "github_copilot_cli"
 
 
 def test_config_auto_detects_ollama_from_local_api_base():
@@ -477,8 +477,8 @@ def test_openai_compat_provider_passes_model_through():
     assert provider.get_default_model() == "github-copilot/gpt-5.3-codex"
 
 
-def test_github_copilot_provider_uses_configured_cli_model():
-    provider = GitHubCopilotProvider(
+def test_github_copilot_cli_provider_uses_configured_cli_model():
+    provider = GitHubCopilotCLIProvider(
         default_model="github-copilot/gpt-5.3-codex",
         copilot_model="gpt-5-mini",
     )

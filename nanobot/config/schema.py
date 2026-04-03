@@ -107,7 +107,7 @@ class ProvidersConfig(Base):
     byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
-    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
+    github_copilot_cli: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot CLI (OAuth)
 
 
 class HeartbeatConfig(Base):
@@ -221,7 +221,10 @@ class Config(BaseSettings):
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
-            if p and model_prefix and normalized_prefix == spec.name:
+            if p and model_prefix and (
+                normalized_prefix == spec.name
+                or normalized_prefix in (kw.lower() for kw in spec.keywords)
+            ):
                 if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
 

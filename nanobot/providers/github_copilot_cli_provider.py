@@ -1,4 +1,4 @@
-"""GitHub Copilot provider that shells out to the Copilot CLI."""
+"""GitHub Copilot CLI provider that shells out to the Copilot CLI."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from nanobot.auth.github_copilot import get_stored_token
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 
-class GitHubCopilotProvider(LLMProvider):
+class GitHubCopilotCLIProvider(LLMProvider):
     """Provider implementation backed by the `copilot` CLI."""
 
     def __init__(
