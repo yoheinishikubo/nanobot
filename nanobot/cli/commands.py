@@ -656,9 +656,14 @@ def gateway(
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
+    from loguru import logger
+
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
+        logger.enable("nanobot")
+    else:
+        logger.disable("nanobot")
 
     config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port

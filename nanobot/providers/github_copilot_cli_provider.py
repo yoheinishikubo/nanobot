@@ -9,6 +9,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from nanobot.auth.github_copilot import get_stored_token
 from nanobot.providers.base import LLMProvider, LLMResponse
 
@@ -259,9 +261,11 @@ class GitHubCopilotCLIProvider(LLMProvider):
 
         if proc.returncode != 0:
             detail = stderr_text or "".join(chunks).strip() or f"exit code {proc.returncode}"
+            logger.warning("Copilot CLI stream failed (rc={}): {}", proc.returncode, detail)
             return None, f"GitHub Copilot CLI failed: {detail}"
 
         full_content = "".join(chunks).strip()
+        logger.debug("Copilot CLI stream completed (rc=0, {} bytes)", len(full_content))
         return full_content or None, None
 
     def _build_cli_args(
@@ -269,7 +273,10 @@ class GitHubCopilotCLIProvider(LLMProvider):
         reasoning_effort: str | None = None,
         use_continue: bool | None = None,
     ) -> list[str]:
-        """Build CLI argument list (shared by _run_cli and _run_cli_stream)."""
+        """Build CLI argument list (shared by _run_cli and _run_cli_stream).
+
+        Also logs the full command line for debugging.
+        """
         args = [command, "--model", cli_model, "--no-color", "--output-format", "text"]
         if self.copilot_allow_all:
             args.append("--allow-all")
@@ -293,6 +300,7 @@ class GitHubCopilotCLIProvider(LLMProvider):
             args.append("--experimental")
         if reasoning_effort:
             args += ["--reasoning-effort", reasoning_effort]
+        logger.debug("Copilot CLI command: {}", " ".join(args))
         return args
 
     async def _run_cli(self, prompt: str, cli_model: str, reasoning_effort: str | None = None, use_continue: bool | None = None) -> tuple[str | None, str | None]:
@@ -352,6 +360,8 @@ class GitHubCopilotCLIProvider(LLMProvider):
 
         if proc.returncode != 0:
             detail = stderr_text or stdout_text or f"exit code {proc.returncode}"
+            logger.warning("Copilot CLI failed (rc={}): {}", proc.returncode, detail)
             return None, f"GitHub Copilot CLI failed: {detail}"
 
+        logger.debug("Copilot CLI completed (rc=0, {} bytes)", len(stdout_text))
         return stdout_text or None, None
