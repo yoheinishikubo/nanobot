@@ -65,6 +65,13 @@ class GitHubCopilotProvider(LLMProvider):
         prompt = self._build_prompt(messages)
         cli_model = self._resolve_cli_model(model)
         content, error = await self._run_cli(prompt, cli_model, reasoning_effort=reasoning_effort)
+        if error and "timed out" in error.lower() and self.copilot_continue:
+            # After a timeout the server may have an open tool call with no result.
+            # Retry immediately without --continue to start a fresh session and
+            # avoid a CAPIError 400 "No tool output found".
+            content, error = await self._run_cli(
+                prompt, cli_model, reasoning_effort=reasoning_effort, use_continue=False
+            )
         if error:
             return LLMResponse(content=error, finish_reason="error")
         return LLMResponse(content=content)
@@ -139,7 +146,7 @@ class GitHubCopilotProvider(LLMProvider):
             return json.dumps(content, ensure_ascii=False)
         return str(content)
 
-    async def _run_cli(self, prompt: str, cli_model: str, reasoning_effort: str | None = None) -> tuple[str | None, str | None]:
+    async def _run_cli(self, prompt: str, cli_model: str, reasoning_effort: str | None = None, use_continue: bool | None = None) -> tuple[str | None, str | None]:
         command = shutil.which(self.cli_command)
         if not command:
             return None, (
@@ -164,7 +171,9 @@ class GitHubCopilotProvider(LLMProvider):
 
         if self.copilot_allow_all:
             args.append("--allow-all")
-        if self.copilot_continue:
+        if use_continue is None:
+            use_continue = self.copilot_continue
+        if use_continue:
             args.append("--continue")
         if self.copilot_autopilot:
             args.append("--autopilot")
@@ -183,6 +192,7 @@ class GitHubCopilotProvider(LLMProvider):
         if reasoning_effort:
             args += ["--reasoning-effort", reasoning_effort]
 
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -197,11 +207,23 @@ class GitHubCopilotProvider(LLMProvider):
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(prompt.encode("utf-8")),
-                timeout=600,
+                timeout=60,
             )
         except asyncio.TimeoutError:
+            if proc is not None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
             return None, "GitHub Copilot CLI timed out."
         except asyncio.CancelledError:
+            if proc is not None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
             raise
         except Exception as exc:
             return None, f"Error calling GitHub Copilot CLI: {exc}"
