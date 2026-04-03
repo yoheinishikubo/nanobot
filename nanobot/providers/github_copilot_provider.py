@@ -207,7 +207,7 @@ class GitHubCopilotProvider(LLMProvider):
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(prompt.encode("utf-8")),
-                timeout=60,
+                timeout=180,
             )
         except asyncio.TimeoutError:
             if proc is not None:
