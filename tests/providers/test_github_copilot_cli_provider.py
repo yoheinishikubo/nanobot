@@ -90,3 +90,63 @@ async def test_github_copilot_cli_provider_adds_force_flag_when_enabled(monkeypa
     await provider.chat([{"role": "user", "content": "Say hi"}])
 
     assert "--yolo" in seen["args"]
+
+
+async def _async_append(lst, item):
+    lst.append(item)
+
+
+@pytest.mark.asyncio
+async def test_github_copilot_cli_provider_streams_stdout_chunks(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.shutil.which", lambda _cmd: "/usr/bin/copilot")
+    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.get_stored_token", lambda: "gho-token")
+
+    class _FakeStdin:
+        def write(self, data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+    class _FakeStdout:
+        def __init__(self):
+            self._chunks = [b"hello ", b"from ", b"copilot"]
+            self._index = 0
+
+        async def read(self, n):
+            if self._index >= len(self._chunks):
+                return b""
+            chunk = self._chunks[self._index]
+            self._index += 1
+            return chunk
+
+    class _FakeStderr:
+        async def read(self):
+            return b""
+
+    class _Proc:
+        returncode = 0
+        stdin = _FakeStdin()
+        stdout = _FakeStdout()
+        stderr = _FakeStderr()
+
+        async def wait(self):
+            pass
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        return _Proc()
+
+    monkeypatch.setattr("nanobot.providers.github_copilot_cli_provider.asyncio.create_subprocess_exec", _fake_create_subprocess_exec)
+
+    provider = GitHubCopilotCLIProvider(working_dir=tmp_path)
+    deltas: list[str] = []
+    response = await provider.chat_stream(
+        [{"role": "user", "content": "Say hi"}],
+        on_content_delta=lambda chunk: _async_append(deltas, chunk),
+    )
+
+    assert deltas == ["hello ", "from ", "copilot"]
+    assert response.content == "hello from copilot"

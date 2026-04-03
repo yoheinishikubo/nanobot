@@ -104,18 +104,32 @@ class GitHubCopilotCLIProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta=None,
     ) -> LLMResponse:
-        response = await self.chat(
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
+        if not on_content_delta:
+            return await self.chat(
+                messages=messages, tools=tools, model=model,
+                max_tokens=max_tokens, temperature=temperature,
+                reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+            )
+
+        prompt = self._build_prompt(messages)
+        cli_model = self._resolve_cli_model(model)
+        use_continue = self.copilot_continue and not self._session_broken
+
+        content, error = await self._run_cli_stream(
+            prompt, cli_model, reasoning_effort=reasoning_effort,
+            use_continue=use_continue, on_content_delta=on_content_delta,
         )
-        if on_content_delta and response.content:
-            await on_content_delta(response.content)
-        return response
+        if error and self.copilot_continue and not self._session_broken and self._is_broken_session(error):
+            self._session_broken = True
+            content, error = await self._run_cli_stream(
+                prompt, cli_model, reasoning_effort=reasoning_effort,
+                use_continue=False, on_content_delta=on_content_delta,
+            )
+        if error:
+            self._session_broken = self._is_broken_session(error)
+            return LLMResponse(content=error, finish_reason="error")
+        self._session_broken = False
+        return LLMResponse(content=content)
 
     def _resolve_cli_model(self, model: str | None) -> str:
         return self.copilot_model
@@ -163,7 +177,15 @@ class GitHubCopilotCLIProvider(LLMProvider):
             return json.dumps(content, ensure_ascii=False)
         return str(content)
 
-    async def _run_cli(self, prompt: str, cli_model: str, reasoning_effort: str | None = None, use_continue: bool | None = None) -> tuple[str | None, str | None]:
+    async def _run_cli_stream(
+        self,
+        prompt: str,
+        cli_model: str,
+        reasoning_effort: str | None = None,
+        use_continue: bool | None = None,
+        on_content_delta=None,
+    ) -> tuple[str | None, str | None]:
+        """Run CLI and stream stdout chunks via on_content_delta."""
         command = shutil.which(self.cli_command)
         if not command:
             return None, (
@@ -177,15 +199,78 @@ class GitHubCopilotCLIProvider(LLMProvider):
                 "GitHub Copilot is not authenticated. Run `nanobot provider login github-copilot` first."
             )
 
-        args = [
-            command,
-            "--model",
-            cli_model,
-            "--no-color",
-            "--output-format",
-            "text",
-        ]
+        args = self._build_cli_args(command, cli_model, reasoning_effort, use_continue)
 
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                cwd=str(self.working_dir) if self.working_dir else None,
+                env={**os.environ, "COPILOT_GITHUB_TOKEN": token},
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            # Send prompt and close stdin
+            proc.stdin.write(prompt.encode("utf-8"))
+            await proc.stdin.drain()
+            proc.stdin.close()
+
+            # Stream stdout chunks as they arrive
+            chunks: list[str] = []
+            deadline = asyncio.get_event_loop().time() + 180
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    proc.kill()
+                    await proc.wait()
+                    return None, "GitHub Copilot CLI timed out."
+                try:
+                    chunk = await asyncio.wait_for(
+                        proc.stdout.read(4096), timeout=remaining,
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    return None, "GitHub Copilot CLI timed out."
+                if not chunk:
+                    break
+                text = chunk.decode("utf-8", "ignore")
+                chunks.append(text)
+                if on_content_delta:
+                    await on_content_delta(text)
+
+            await proc.wait()
+        except asyncio.CancelledError:
+            if proc is not None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
+            raise
+        except Exception as exc:
+            return None, f"Error calling GitHub Copilot CLI: {exc}"
+
+        stderr_text = ""
+        if proc.stderr:
+            raw = await proc.stderr.read()
+            stderr_text = raw.decode("utf-8", "ignore").strip()
+
+        if proc.returncode != 0:
+            detail = stderr_text or "".join(chunks).strip() or f"exit code {proc.returncode}"
+            return None, f"GitHub Copilot CLI failed: {detail}"
+
+        full_content = "".join(chunks).strip()
+        return full_content or None, None
+
+    def _build_cli_args(
+        self, command: str, cli_model: str,
+        reasoning_effort: str | None = None,
+        use_continue: bool | None = None,
+    ) -> list[str]:
+        """Build CLI argument list (shared by _run_cli and _run_cli_stream)."""
+        args = [command, "--model", cli_model, "--no-color", "--output-format", "text"]
         if self.copilot_allow_all:
             args.append("--allow-all")
         if use_continue is None:
@@ -208,6 +293,23 @@ class GitHubCopilotCLIProvider(LLMProvider):
             args.append("--experimental")
         if reasoning_effort:
             args += ["--reasoning-effort", reasoning_effort]
+        return args
+
+    async def _run_cli(self, prompt: str, cli_model: str, reasoning_effort: str | None = None, use_continue: bool | None = None) -> tuple[str | None, str | None]:
+        command = shutil.which(self.cli_command)
+        if not command:
+            return None, (
+                "GitHub Copilot CLI is not installed. Install `@github/copilot` "
+                f"and ensure `{self.cli_command}` is on PATH."
+            )
+
+        token = get_stored_token()
+        if not token:
+            return None, (
+                "GitHub Copilot is not authenticated. Run `nanobot provider login github-copilot` first."
+            )
+
+        args = self._build_cli_args(command, cli_model, reasoning_effort, use_continue)
 
         proc = None
         try:
